@@ -758,6 +758,11 @@ func (chaincodeSupport *ChaincodeSupport) getVMType(cds *pb.ChaincodeDeploymentS
 	if cds.ExecEnv == pb.ChaincodeDeploymentSpec_SYSTEM {
 		return container.SYSTEM, nil
 	}
+
+	if !viper.GetBool("peer.usekubernetes") {
+		return container.KUBERNETES, nil
+	}
+
 	return container.DOCKER, nil
 }
 
