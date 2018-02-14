@@ -46,6 +46,7 @@ type Platform interface {
 	GetDeploymentPayload(spec *pb.ChaincodeSpec) ([]byte, error)
 	GenerateDockerfile(spec *pb.ChaincodeDeploymentSpec) (string, error)
 	GenerateDockerBuild(spec *pb.ChaincodeDeploymentSpec, tw *tar.Writer) error
+	GenerateKubernetesBuild(spec *pb.ChaincodeDeploymentSpec, tw *tar.Writer) error
 }
 
 var logger = flogging.MustGetLogger("chaincode-platform")
@@ -168,6 +169,31 @@ func generateDockerBuild(platform Platform, cds *pb.ChaincodeDeploymentSpec, inp
 	return nil
 }
 
+func generateKubernetesBuild(platform Platform, cds *pb.ChaincodeDeploymentSpec, inputFiles InputFiles, tw *tar.Writer) error {
+
+	var err error
+
+	// ----------------------------------------------------------------------------------------------------
+	// First stream out our static inputFiles
+	// ----------------------------------------------------------------------------------------------------
+	for name, data := range inputFiles {
+		err = cutil.WriteBytesToPackage(name, data, tw)
+		if err != nil {
+			return fmt.Errorf("Failed to inject \"%s\": %s", name, err)
+		}
+	}
+
+	// ----------------------------------------------------------------------------------------------------
+	// Now give the platform an opportunity to contribute its own context to the build
+	// ----------------------------------------------------------------------------------------------------
+	err = platform.GenerateKubernetesBuild(cds, tw)
+	if err != nil {
+		return fmt.Errorf("Failed to generate platform-specific docker build: %s", err)
+	}
+
+	return nil
+}
+
 func GenerateDockerBuild(cds *pb.ChaincodeDeploymentSpec) (io.Reader, error) {
 
 	inputFiles := make(InputFiles)
@@ -214,6 +240,53 @@ func GenerateDockerBuild(cds *pb.ChaincodeDeploymentSpec) (io.Reader, error) {
 		tw := tar.NewWriter(gw)
 
 		err := generateDockerBuild(platform, cds, inputFiles, tw)
+		if err != nil {
+			logger.Error(err)
+		}
+
+		tw.Close()
+		gw.Close()
+		output.CloseWithError(err)
+	}()
+
+	return input, nil
+}
+
+func GenerateKubernetesBuild(cds *pb.ChaincodeDeploymentSpec) (io.Reader, error) {
+	inputFiles := make(InputFiles)
+
+	// ----------------------------------------------------------------------------------------------------
+	// Determine our platform driver from the spec
+	// ----------------------------------------------------------------------------------------------------
+	platform, err := Find(cds.ChaincodeSpec.Type)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to determine platform type: %s", err)
+	}
+
+	// ----------------------------------------------------------------------------------------------------
+	// Transfer the peer's TLS certificate to our list of input files, if applicable
+	// ----------------------------------------------------------------------------------------------------
+	// NOTE: We bake the peer TLS certificate in at the time we build the chaincode container if a cert is
+	// found, regardless of whether TLS is enabled or not.  The main implication is that if the administrator
+	// updates the peer cert, the chaincode containers will need to be invalidated and rebuilt.
+	// We will manage enabling or disabling TLS at container run time via CORE_PEER_TLS_ENABLED
+	cert, err := getPeerTLSCert()
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read the TLS certificate: %s", err)
+	}
+
+	inputFiles["peer.crt"] = cert
+
+	// ----------------------------------------------------------------------------------------------------
+	// Finally, launch an asynchronous process to stream all of the above into a docker build context
+	// ----------------------------------------------------------------------------------------------------
+	input, output := io.Pipe()
+
+	go func() {
+		gw := gzip.NewWriter(output)
+		tw := tar.NewWriter(gw)
+
+		err := generateKubernetesBuild(platform, cds, inputFiles, tw)
 		if err != nil {
 			logger.Error(err)
 		}

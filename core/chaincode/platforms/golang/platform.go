@@ -460,3 +460,26 @@ func (goPlatform *Platform) GenerateDockerBuild(cds *pb.ChaincodeDeploymentSpec,
 
 	return cutil.WriteBytesToPackage("binpackage.tar", binpackage.Bytes(), tw)
 }
+
+func (goPlatform *Platform) GenerateKubernetesBuild(cds *pb.ChaincodeDeploymentSpec, tw *tar.Writer) error {
+	spec := cds.ChaincodeSpec
+
+	pkgname, err := decodeUrl(spec)
+	if err != nil {
+		return fmt.Errorf("could not decode url: %s", err)
+	}
+
+	const ldflags = "-linkmode external -extldflags '-static'"
+
+	codepackage := bytes.NewReader(cds.CodePackage)
+	binpackage := bytes.NewBuffer(nil)
+	cmd := fmt.Sprintf("GOPATH=/chaincode/input:$GOPATH go build -ldflags \"%s\" -o /chaincode/output/chaincode %s", ldflags, pkgname)
+
+	err = util.KubernetesBuild(cmd, codepackage, binpackage)
+
+	if err != nil {
+		return err
+	}
+
+	return cutil.WriteBytesToPackage("binpackage.tar", binpackage.Bytes(), tw)
+}

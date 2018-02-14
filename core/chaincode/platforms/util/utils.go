@@ -245,3 +245,17 @@ func DockerBuild(opts DockerBuildOptions) error {
 
 	return nil
 }
+
+func KubernetesBuild(cmd string, codepackage *bytes.Reader, binpackage *bytes.Buffer) error {
+	// create a pod with one container
+	// image in "chaincode.builder"
+	// command []string{"/bin/sh", "-c", cmd}
+
+	// extract codepackage to "/chaincode/input"
+
+	// if build ok
+
+	// create tar file with "/chaincode/output/." to binpackage
+
+	return nil
+}

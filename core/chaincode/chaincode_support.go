@@ -657,7 +657,13 @@ func (chaincodeSupport *ChaincodeSupport) Launch(context context.Context, cccid 
 			}
 		}
 
-		builder := func() (io.Reader, error) { return platforms.GenerateDockerBuild(cds) }
+		var builder func() (io.Reader, error)
+
+		if viper.IsSet("peer.usekubernetes") && viper.GetBool("peer.usekubernetes") {
+			builder = func() (io.Reader, error) { return platforms.GenerateKubernetesBuild(cds) }
+		} else {
+			builder = func() (io.Reader, error) { return platforms.GenerateDockerBuild(cds) }
+		}
 
 		cLang := cds.ChaincodeSpec.Type
 		err = chaincodeSupport.launchAndWaitForRegister(context, cccid, cds, cLang, builder)
@@ -692,6 +698,11 @@ func (chaincodeSupport *ChaincodeSupport) getVMType(cds *pb.ChaincodeDeploymentS
 	if cds.ExecEnv == pb.ChaincodeDeploymentSpec_SYSTEM {
 		return container.SYSTEM, nil
 	}
+
+	if viper.IsSet("peer.usekubernetes") && viper.GetBool("peer.usekubernetes") {
+		return container.KUBERNETES, nil
+	}
+
 	return container.DOCKER, nil
 }
 
